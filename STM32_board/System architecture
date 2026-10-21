@@ -1,0 +1,11 @@
+[ ICM-42688 INT1 Pin ] ──(EXTI Interrupt)──> [ STM32 DWT Timer: Đọc dt chính xác bằng Microsecond ]
+                                                            │
+[ Dữ liệu Raw Accel/Gyro ] ───> [ 1. Adaptive Kalman Filter (Tự chỉnh ma trận R khi có gia tốc động) ]
+                                                            │
+                                                [ 2. FSM Crash Detection ] (Nhận diện Đổ/Va chạm)
+                                                            │
+                                                [ 3. Snapshot Data (Chống Race-Condition) ]
+                                                            │
+                                                [ 4. Frame Builder + CRC16-CCITT ]
+                                                            │
+[ ESP32 ] <────(Không nghẽn CPU)─────── [ STM32 UART Non-Blocking DMA Transmission ]
