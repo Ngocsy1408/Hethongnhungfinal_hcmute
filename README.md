@@ -50,7 +50,7 @@ Hệ thống áp dụng kiến trúc phân tầng **Dual-MCU (Hai vi điều khi
 │  │                                    │   │   SĐT SOS & lưu vĩnh viễn vào NVS  │  │
 │  └────────────────────────────────────┘   └────────────────────────────────────┘  │
 └────────┬───────────────────────────┬──────────────────────────┬───────────────────┘
-         │ UART2 (38400 bps)         │ SPI2 (FSPI)              │ UART0 (115200 bps)
+         │ UART2 (115200 bps)         │ SPI2 (FSPI)              │ UART0 (115200 bps)
          ▼                           ▼                          ▼
  [ GPS u-blox M10 ]        [ Flash W25Q128 (16MB) ]    [ SIM 4G LTE A7680C ]
  (GPIO 18 RX / GPIO 8 TX)  (CS:10, MOSI:11, SCK:12,    (GPIO 4 RX / GPIO 5 TX)
