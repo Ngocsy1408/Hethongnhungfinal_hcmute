@@ -185,7 +185,9 @@ Mỗi `10ms` (`100Hz`), STM32F401 đóng gói và truyền 1 khung dữ liệu n
 
 ## 📱 Tập Lệnh Điều Khiển Qua Bluetooth (BLE Smartphone Commands)
 
-Sử dụng ứng dụng **Serial Bluetooth Terminal** (chế độ *Bluetooth LE*) hoặc **nRF Connect** trên điện thoại, kết nối vào thiết bị **`HOP_DEN_XE_MAY`** và gửi các lệnh văn bản sau:
+> 📱 **App giao diện đồ họa:** xem [`ble_app/`](ble_app/README.md) — web app Bluetooth (PWA) có đồng hồ góc nghiêng, đổi số SOS, biểu đồ băng hộp đen 15 giây và cảnh báo tai nạn.
+
+Hoặc dùng ứng dụng **Serial Bluetooth Terminal** (chế độ *Bluetooth LE*) / **nRF Connect** trên điện thoại, kết nối vào thiết bị **`HOP_DEN_XE_MAY`** và gửi các lệnh văn bản sau:
 
 | Cú pháp lệnh gửi đi | Chức năng thực hiện | Phản hồi từ Hộp Đen về Điện thoại |
 | :--- | :--- | :--- |

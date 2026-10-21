@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0f0e">
+  <meta name="description" content="App Bluetooth cấu hình và đọc Hộp Đen Xe Máy (ESP32-S3)">
+  <title>Hộp Đen Xe Máy</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="brand">
+      <svg width="32" height="32" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="var(--ink)"/><path d="M14 40a18 18 0 0 1 36 0" fill="none" stroke="var(--bg)" stroke-width="5" stroke-linecap="round"/><path d="M32 40 44 24" stroke="var(--accent)" stroke-width="5" stroke-linecap="round"/><circle cx="32" cy="40" r="5" fill="var(--accent)"/></svg>
+      <span>HỘP ĐEN<small id="device-name">Chưa kết nối</small></span>
+    </h1>
+    <span class="link-pill" id="link-pill" data-state="idle" role="status"><span class="dot"></span><span id="link-text">Ngắt</span></span>
+    <button class="btn btn-primary btn-sm" id="btn-connect" type="button">Kết nối</button>
+  </header>
+
+  <main>
+    <section class="alert span-all" id="crash-alert" role="alert" hidden>
+      <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20L12 3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v5M12 18v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <div><strong>Phát hiện tai nạn!</strong><span id="crash-alert-text">Hộp đen đang gửi SMS SOS và ghi 5 giây sau va chạm.</span></div>
+      <button class="btn btn-sm" id="btn-dismiss-alert" type="button">Đã rõ</button>
+    </section>
+
+    <section class="panel welcome span-all" id="welcome">
+      <h2>Kết nối với hộp đen<br>trên xe của bạn</h2>
+      <p>Bật nguồn ESP32-S3, bật Bluetooth trên điện thoại rồi bấm <strong>Kết nối</strong> và chọn thiết bị <span class="num">HOP_DEN_XE_MAY</span>.</p>
+      <p class="warn" id="unsupported" hidden>Trình duyệt này không hỗ trợ Web Bluetooth. Hãy mở bằng Chrome/Edge trên Android, Windows, macOS hoặc app Bluefy trên iPhone.</p>
+      <button class="btn btn-primary" id="btn-connect-hero" type="button">Kết nối Bluetooth</button>
+    </section>
+
+    <!-- Trạng thái trực tiếp -->
+    <section class="panel" aria-labelledby="h-live">
+      <div class="panel-head">
+        <h2 id="h-live">Trạng thái xe</h2>
+        <span class="aside" id="live-updated">—</span>
+      </div>
+
+      <div class="cluster">
+        <div class="gauge">
+          <svg viewBox="0 0 320 186" role="img" aria-labelledby="gauge-title">
+            <title id="gauge-title">Góc nghiêng Roll</title>
+            <path d="M20 170A140 140 0 0 1 300 170" fill="none" stroke="var(--surface-sunk)" stroke-width="18" stroke-linecap="round"/>
+            <path d="M20 170A140 140 0 0 1 61.01 71.01" fill="none" stroke="var(--critical)" stroke-opacity="0.55" stroke-width="18" stroke-linecap="round"/>
+            <path d="M258.99 71.01A140 140 0 0 1 300 170" fill="none" stroke="var(--critical)" stroke-opacity="0.55" stroke-width="18" stroke-linecap="round"/>
+            <g id="gauge-ticks"></g>
+            <g class="needle" id="needle">
+              <path d="M160 170 160 46" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/>
+            </g>
+            <circle cx="160" cy="170" r="9" fill="var(--accent)"/>
+            <circle cx="160" cy="170" r="3.5" fill="var(--surface)"/>
+          </svg>
+          <div class="gauge-readout">
+            <div class="big num" id="roll-value">—</div>
+            <div class="label">Roll · Pitch <span class="num" id="pitch-value">—</span></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="speed">
+            <span class="hero num" id="speed-value">—</span>
+            <span class="unit">KM/H · GPS</span>
+          </div>
+          <div style="margin-top:14px">
+            <span class="state-chip" id="state-chip" data-level="none">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+              <span id="state-text">Chưa có dữ liệu</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <dl class="readouts">
+        <div><dt>GPS</dt><dd id="gps-value">—</dd></div>
+        <div><dt>Vị trí</dt><dd id="pos-value">—</dd></div>
+      </dl>
+
+      <div class="toolbar">
+        <button class="btn btn-sm" id="btn-info" type="button" data-needs-link disabled>Làm mới</button>
+        <label class="switch"><input type="checkbox" id="auto-refresh" checked> Tự cập nhật mỗi 2 giây</label>
+      </div>
+    </section>
+
+    <!-- Số điện thoại SOS -->
+    <section class="panel" aria-labelledby="h-sos">
+      <div class="panel-head"><h2 id="h-sos">Số nhận SOS</h2></div>
+      <p class="sos-current num" id="sos-current">—</p>
+      <form class="field" id="sos-form" novalidate>
+        <label for="sos-input">Số điện thoại người thân</label>
+        <div class="field-row">
+          <input id="sos-input" type="tel" inputmode="tel" autocomplete="tel" placeholder="0912345678" maxlength="20" aria-describedby="sos-hint">
+          <button class="btn btn-primary" type="submit" data-needs-link disabled>Lưu</button>
+        </div>
+        <p class="hint" id="sos-hint">9–15 chữ số, có thể bắt đầu bằng +84. Lưu vĩnh viễn vào NVS của ESP32.</p>
+      </form>
+
+      <div class="danger-zone">
+        <p><strong>Thử SOS</strong> — giả lập tai nạn: hộp đen sẽ <strong>gửi SMS và gọi thật</strong> tới số trên, rồi ghi băng 15 giây vào W25Q128.</p>
+        <div><button class="btn btn-danger btn-sm" id="btn-test-sos" type="button" data-needs-link disabled>Thử SOS</button></div>
+      </div>
+    </section>
+
+    <!-- Băng ghi hộp đen -->
+    <section class="panel span-all" aria-labelledby="h-log">
+      <div class="panel-head">
+        <h2 id="h-log">Băng hộp đen 15 giây · W25Q128</h2>
+        <span class="aside" id="log-meta"></span>
+      </div>
+
+      <div id="log-empty" class="empty">Bấm “Đọc hộp đen” để tải diễn biến T−10s → T+5s quanh vụ tai nạn gần nhất.</div>
+
+      <div id="log-view" hidden>
+        <div class="charts">
+          <figure class="chart" id="chart-roll" style="margin:0"><h3>Góc nghiêng Roll (°)</h3></figure>
+          <figure class="chart" id="chart-g" style="margin:0"><h3>Lực G lớn nhất mỗi giây</h3></figure>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Mốc</th><th>Roll</th><th>Pitch</th><th>Lực G</th><th>Tốc độ</th><th>Trạng thái</th></tr></thead>
+            <tbody id="log-rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button class="btn btn-primary btn-sm" id="btn-log" type="button" data-needs-link disabled>Đọc hộp đen</button>
+        <button class="btn btn-sm" id="btn-csv" type="button" disabled>Xuất CSV</button>
+        <button class="btn btn-danger btn-sm" id="btn-clear" type="button" data-needs-link disabled style="margin-left:auto">Xóa hộp đen</button>
+      </div>
+    </section>
+
+    <!-- Terminal -->
+    <details class="panel terminal span-all">
+      <summary class="panel-head" style="margin:0"><h2>Terminal lệnh thô</h2><span class="aside">SDT: · INFO · LOG · CLEAR · TEST_SOS</span></summary>
+      <div class="console" id="console" aria-live="polite"></div>
+      <form class="field-row field" id="raw-form">
+        <input id="raw-input" type="text" autocomplete="off" autocapitalize="characters" placeholder="Nhập lệnh, ví dụ INFO" aria-label="Lệnh gửi tới hộp đen">
+        <button class="btn btn-sm" type="submit" data-needs-link disabled>Gửi</button>
+      </form>
+    </details>
+  </main>
+
+  <div class="toast" id="toast" data-show="false" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

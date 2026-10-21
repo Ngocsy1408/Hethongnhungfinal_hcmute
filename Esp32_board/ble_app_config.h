@@ -21,15 +21,27 @@ extern volatile TelemetryPacket_t latestIMU;
 extern volatile GPSData_t         latestGPS;
 extern volatile bool              sosTriggered;
 
+// MTU mặc định 23 byte -> mỗi notify chỉ chở được 20 byte dữ liệu
+#define BLE_CHUNK_SIZE      20
+#define BLE_CHUNK_DELAY_MS  20
+
 BLECharacteristic *pTxCharacteristic = NULL;
 bool deviceConnected = false;
+SemaphoreHandle_t bleTxMutex = NULL; // Chặn 2 task gửi chen ngang nhau
 
-// Gửi phản hồi chữ về màn hình App điện thoại qua Bluetooth
+// Gửi phản hồi chữ về màn hình App điện thoại qua Bluetooth (chia nhỏ theo MTU)
 void BLE_SendToPhone(String text) {
-    if (deviceConnected && pTxCharacteristic != NULL) {
-        pTxCharacteristic->setValue(text.c_str());
+    if (!deviceConnected || pTxCharacteristic == NULL || bleTxMutex == NULL) return;
+    xSemaphoreTake(bleTxMutex, portMAX_DELAY);
+    uint8_t *data = (uint8_t*)text.c_str();
+    size_t len = text.length();
+    for (size_t off = 0; off < len && deviceConnected; off += BLE_CHUNK_SIZE) {
+        size_t n = min((size_t)BLE_CHUNK_SIZE, len - off);
+        pTxCharacteristic->setValue(data + off, n);
         pTxCharacteristic->notify();
+        delay(BLE_CHUNK_DELAY_MS);
     }
+    xSemaphoreGive(bleTxMutex);
 }
 
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -76,6 +88,8 @@ class MyRxCallbacks: public BLECharacteristicCallbacks {
             info += "SDT SOS: " + sosPhoneNumber + "\n";
             info += "Roll: " + String(latestIMU.roll, 1) + " | Pitch: " + String(latestIMU.pitch, 1) + "\n";
             info += "GPS Fix: " + String(latestGPS.is_valid ? "OK" : "Chua Fix") + " (" + String(latestGPS.satellites) + " sat)\n";
+            info += "Vi tri: " + String(latestGPS.latitude, 6) + "," + String(latestGPS.longitude, 6) + "\n";
+            info += "Trang thai: " + String(latestIMU.crash_state) + "\n";
             info += "Toc do: " + String(latestGPS.speed_kmh, 1) + " km/h\n";
             BLE_SendToPhone(info);
         }
@@ -107,6 +121,8 @@ void BLE_Init_Server() {
     sosPhoneNumber = nvsPrefs.getString("sos_phone", "0912345678");
     nvsPrefs.end();
     Serial.println("[NVS FLASH] Số điện thoại SOS hiện tại: " + sosPhoneNumber);
+
+    bleTxMutex = xSemaphoreCreateMutex();
 
     BLEDevice::init("HOP_DEN_XE_MAY"); // Tên Bluetooth hiện trên điện thoại
     BLEServer *pServer = BLEDevice::createServer();

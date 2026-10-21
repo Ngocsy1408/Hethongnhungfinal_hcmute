@@ -1,0 +1,14 @@
+{
+  "name": "Hộp Đen Xe Máy",
+  "short_name": "Hộp Đen",
+  "description": "Cấu hình số SOS và đọc băng hộp đen 15 giây qua Bluetooth",
+  "lang": "vi",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d0f0e",
+  "theme_color": "#0d0f0e",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
