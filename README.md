@@ -1,236 +1,233 @@
-# 🏍️ Smart Motorcycle Blackbox & Emergency SOS System
-### Hệ Thống Hộp Đen Xe Máy Thông Minh & Cảnh Báo Tai Nạn Tự Động (STM32F401 + ESP32-S3 N16R8)
+# 🏍️ Smart Motorcycle Blackbox & Automated 4G SOS Telemetry System
+### Hệ Thống Hộp Đen Xe Máy Thông Minh, Lọc Nhiễu Quán Tính Thời Gian Thực & Cứu Hộ Tự Động Đa Vi Điều Khiển
 
-![STM32](https://img.shields.io/badge/Co--Processor-STM32F401CCU6-03234B?style=for-the-badge&logo=stmicroelectronics)
-![ESP32-S3](https://img.shields.io/badge/Main--MCU-ESP32--S3_N16R8-E7352C?style=for-the-badge&logo=espressif)
-![IMU](https://img.shields.io/badge/IMU_6--Axis-TDK_ICM42688-FF6F00?style=for-the-badge)
-![GNSS](https://img.shields.io/badge/GNSS-u--blox_M10-0052CC?style=for-the-badge)
-![4G_LTE](https://img.shields.io/badge/4G_LTE-SIMCom_A7680C-00C853?style=for-the-badge)
-![Flash](https://img.shields.io/badge/Storage-Winbond_W25Q128_16MB-9C27B0?style=for-the-badge)
-![RTOS](https://img.shields.io/badge/OS-FreeRTOS_Dual--Core-2196F3?style=for-the-badge)
-
-Dự án **Hộp Đen Xe Máy Thông Minh (Smart Motorcycle Blackbox)** là hệ thống nhúng thời gian thực đa vi điều khiển, được thiết kế chuyên biệt để hoạt động trong môi trường rung động khắc nghiệt của xe gắn máy. Hệ thống thực hiện thu thập dữ liệu quán tính tốc độ cao (`100Hz`), lọc nhiễu động cơ đốt trong, ước lượng góc nghiêng chính xác khi xe ôm cua/phanh gấp, định vị vệ tinh GNSS, **ghi lại băng dữ liệu 15 giây trước và sau va chạm vào bộ nhớ Flash độc lập (`W25Q128`)**, đồng thời tự động **nhắn tin SMS kèm tọa độ Google Maps & gọi điện cứu hộ khẩn cấp qua mạng 4G LTE (`A7680C`)** tới số điện thoại người thân được cấu hình qua **Bluetooth (`BLE 5.0`)**.
+![STM32F401](https://img.shields.io/badge/Co--Processor-STM32F401CCU6_(Cortex--M4F)-03234B?style=for-the-badge&logo=stmicroelectronics)
+![ESP32-S3](https://img.shields.io/badge/Main--Controller-ESP32--S3_N16R8_(Dual--Core)-E7352C?style=for-the-badge&logo=espressif)
+![ICM42688](https://img.shields.io/badge/IMU_6--Axis-TDK_ICM--42688--P-FF6F00?style=for-the-badge)
+![GNSS](https://img.shields.io/badge/GNSS_4--System-u--blox_M10_(115200_bps)-0052CC?style=for-the-badge)
+![4G_LTE](https://img.shields.io/badge/4G_LTE_Cat--1-SIMCom_A7682S--LANS-00C853?style=for-the-badge)
+![Flash](https://img.shields.io/badge/Blackbox_Storage-Winbond_W25Q128_(16MB)-9C27B0?style=for-the-badge)
+![BLE](https://img.shields.io/badge/Wireless_Config-Bluetooth_BLE_5.0-2196F3?style=for-the-badge&logo=bluetooth)
 
 ---
 
-## 🏗️ Kiến Trúc Tổng Thể Hệ Thống (System Architecture)
+## 📖 1. Giới Thiệu Tổng Quan (Overview)
 
-Hệ thống áp dụng kiến trúc phân tầng **Dual-MCU (Hai vi điều khiển song song)** kết hợp **Dual-Core FreeRTOS** để đảm bảo tính thời gian thực tuyệt đối (Hard Real-time), không bao giờ bị mất mẫu cảm biến trong lúc chờ xử lý mạng 4G hay ghi bộ nhớ Flash:
+**Smart Motorcycle Blackbox** là hệ thống hộp đen hành trình và cảnh báo tai nạn tự động chuẩn công nghiệp được thiết kế chuyên biệt cho xe gắn máy. Khác với các hệ thống đo góc nghiêng cơ bản vốn dễ bị tê liệt bởi **nhiễu rung tần số cao từ động cơ đốt trong** và **lực ly tâm khi xe nghiêng vào cua**, dự án này giải quyết bài toán bằng kiến trúc **phân tách phần cứng song song (Dual-MCU Architecture)**:
+
+1. **Node Xử Lý Quán Tính Thời Gian Thực (`STM32F401CCU6` + `ICM-42688`):**
+   - Chạy độc lập ở xung nhịp `84MHz` với tập lệnh phần cứng dấu phẩy động (**FPU**).
+   - Kích hoạt bộ lọc chống chồng phổ phần cứng (**Hardware Anti-Aliasing Filter - AAF 42Hz**) và bộ lọc thông thấp **UI DLPF bậc 2** ngay bên trong cảm biến `ICM-42688`.
+   - Thực thi thuật toán **Lọc Kalman Thích Ứng (Adaptive Kalman Filter - AKF)** ở tần số cố định **`100Hz` (`10ms`)** với độ phân giải thời gian cấp micro-giây ($\mu s$) từ bộ đếm phần cứng **DWT Cycle Counter**.
+   - Đóng gói dữ liệu nhị phân `45 Bytes/frame` kèm mã kiểm tra toàn vẹn **`CRC16-CCITT`** truyền sang vi điều khiển trung tâm.
+
+2. **Node Trung Tâm Hộp Đen & Viễn Thông Đa Nhiệm (`ESP32-S3 N16R8` + `FreeRTOS`):**
+   - **Tự động hiệu chuẩn góc lắp đặt (`Auto-Zero Mounting Calibration`):** Tự động lấy vị trí đặt mạch ban đầu làm mốc cân bằng `0.00°`, cho phép gắn hộp đen ở mọi tư thế trong cốp xe.
+   - **Cơ chế "Hộp Đen Máy Bay" 15 Giây (`10s Pre-Crash + 5s Post-Crash Recorder`):** Liên tục duy trì bộ đệm vòng (*Circular Ring Buffer*) lưu 10 giây quá khứ gần nhất trong RAM. Khi xảy ra va chạm (`T = 0s`), hệ thống đóng băng 10 giây trước đó, thu tiếp 5 giây diễn biến sau tai nạn và khắc vĩnh viễn toàn bộ **16 mốc thời gian (`T-10s` đến `T+5s`)** vào chip nhớ **NOR Flash `W25Q128` (16MB)**.
+   - **Định vị vệ tinh đa hệ (`u-blox M10`) & Cứu hộ 4G LTE (`A7682S-LANS`):** Thu nhận đồng thời 4 hệ thống vệ tinh (*GPS, Galileo, BeiDou, QZSS*) ở tốc độ `115200 bps` và tự động bắn tin nhắn **SMS khẩn cấp kèm đường link bản đồ Google Maps**, vận tốc, góc nghiêng và lực va chạm cực đại ($G_{max}$) về số điện thoại người thân.
+   - **Cấu hình không dây qua Bluetooth (`BLE 5.0`):** Đổi số điện thoại nhận tin nhắn cứu hộ (`SDT:...`), đặt lại góc cân bằng (`ZERO`) và trích xuất dữ liệu hộp đen (`LOG`) trực tiếp từ điện thoại thông minh, lưu vĩnh viễn vào bộ nhớ **NVS Flash**.
+
+---
+
+## 🏗️ 2. Sơ Đồ Kiến Trúc Hệ Thống (System Architecture)
 
 ```text
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│                    KHỐI ĐO LƯỜNG QUÁN TÍNH THỜI GIAN THỰC (100Hz)                 │
-│                                                                                   │
-│  [ Cảm biến 6 trục ICM-42688 ]                                                    │
-│   ├─ Bộ lọc cứng AAF (42Hz) + UI DLPF bậc 2 (Chặn rung động cơ 60Hz - 250Hz)     │
-│   └─ Giao tiếp SPI Mode 3 (10.5 MHz, Burst Read 14 Bytes)                         │
-│                 │                                                                 │
-│                 ▼                                                                 │
-│  [ Vi điều khiển STM32F401CCU6 (ARM Cortex-M4F @ 84MHz) ]                         │
-│   ├─ Bộ đếm vi mô phần cứng DWT Timer (Độ phân giải 1 µs)                         │
-│   ├─ Thuật toán Adaptive Kalman Filter (Tự thích ứng ma trận R chống lực ly tâm)  │
-│   ├─ Máy trạng thái hữu hạn (FSM) nhận diện Ngã xe & Va chạm mạnh                 │
-│   └─ Đóng gói Binary Frame (45 Bytes) + Mã kiểm tra toàn vẹn CRC16-CCITT          │
-└─────────────────┬─────────────────────────────────────────────────────────────────┘
-                  │  UART1 (115200 bps, Chu kỳ 10ms / 100Hz)
-                  │  [PA9 (TX) ──> GPIO 17 (RX1)] & [PA10 (RX) <── GPIO 16 (TX1)]
-                  ▼
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│              KHỐI XỬ LÝ TRUNG TÂM & VIỄN THÔNG (ESP32-S3 N16R8 @ 240MHz)          │
-│                                                                                   │
-│  ┌────────────────────────────────────┐   ┌────────────────────────────────────┐  │
-│  │     CORE 1 (Real-Time Ingestion)   │   │   CORE 0 (Blackbox & Telemetry)    │  │
-│  │ ────────────────────────────────── │   │ ────────────────────────────────── │  │
-│  │ • Thu nhận gói 45-byte từ STM32    │   │ • Quản lý Bộ đệm vòng 10 giây      │  │
-│  │ • Kiểm tra toàn vẹn CRC16-CCITT    │   │   trước tai nạn + 5 giây sau       │  │
-│  │ • Tính gia tốc tổng hợp Peak G     │   │ • Ghi/Đọc băng 15s vào W25Q128     │  │
-│  │ • Giải mã NMEA từ GPS u-blox M10   │   │ • Điều khiển SIM 4G A7680C (SMS/   │  │
-│  │   (Vĩ độ, Kinh độ, Số vệ tinh,     │   │   Call SOS kèm Link Google Maps)   │  │
-│  │    Vận tốc thực tế km/h)           │   │ • Phát sóng BLE 5.0 nhận lệnh đổi  │  │
-│  │                                    │   │   SĐT SOS & lưu vĩnh viễn vào NVS  │  │
-│  └────────────────────────────────────┘   └────────────────────────────────────┘  │
-└────────┬───────────────────────────┬──────────────────────────┬───────────────────┘
-         │ UART2 (115200 bps)         │ SPI2 (FSPI)              │ UART0 (115200 bps)
-         ▼                           ▼                          ▼
- [ GPS u-blox M10 ]        [ Flash W25Q128 (16MB) ]    [ SIM 4G LTE A7680C ]
- (GPIO 18 RX / GPIO 8 TX)  (CS:10, MOSI:11, SCK:12,    (GPIO 4 RX / GPIO 5 TX)
-                            MISO:13)
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│                 TẦNG 1: KHỐI ĐO LƯỜNG & LỌC NHIỄU QUÁN TÍNH (100Hz)                  │
+│                                                                                      │
+│  [ Cảm biến IMU 6 trục TDK ICM-42688-P ]                                             │
+│   ├─ Dải đo: Accel ±16G (Chống bão hòa khi va chạm) | Gyro ±2000 dps                 │
+│   ├─ Bộ lọc cứng: Anti-Aliasing Filter (AAF 42Hz) + UI DLPF Order 2 (Chặn rung máy)  │
+│   └─ Giao tiếp: SPI1 Mode 3 (10.5 MHz, Burst Read 14 Bytes đồng bộ pha)              │
+│                                        │                                             │
+│                                        ▼                                             │
+│  [ Vi điều khiển STM32F401CCU6 (ARM Cortex-M4F @ 84MHz, Bare-Metal Register) ]       │
+│   ├─ Khởi động độc lập: Constructor FPU Enable (SCB_CPACR) & Cold-Boot DWT Timer     │
+│   ├─ Bộ lọc: Adaptive Kalman Filter (Tự điều chỉnh R_adaptive theo ||a|| - 1.0g)     │
+│   └─ Đóng gói: Khung nhị phân 45 Bytes (#pragma pack(1)) + Checksum CRC16-CCITT      │
+└────────────────────────────────────────┬─────────────────────────────────────────────┘
+                                         │
+                        UART1 (115200 bps, 8N1, 100 Frames/s)
+                        [PA9 (TX) ──> GPIO 17 (RX1)]
+                        [PA10(RX) <── GPIO 16 (TX1)]
+                                         │
+                                         ▼
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│            TẦNG 2: KHỐI ĐIỀU PHỐI TRUNG TÂM (ESP32-S3 N16R8 @ 240MHz)                │
+│                                                                                      │
+│  ┌───────────────────────────────────────┐  ┌─────────────────────────────────────┐  │
+│  │       CORE 1 (Real-Time Loop)         │  │     CORE 0 (Task_Blackbox_Manager)  │  │
+│  │ ───────────────────────────────────── │  │ ─────────────────────────────────── │  │
+│  │ • Thu nhận gói 45-byte từ STM32F401   │  │ • Nhịp 1Hz: Cập nhật Bộ đệm vòng    │  │
+│  │ • Kiểm tra mã bảo mật CRC16-CCITT     │  │   10 giây trước va chạm (T-10..T-1) │  │
+│  │ • Tự động lấy mốc 0.00° (Auto-Zero)   │  │ • Khi tai nạn (T=0s): Đóng băng 10s │  │
+│  │ • Phát hiện Ngã xe (>55° trong 1.5s)  │  │   quá khứ + thu tiếp 5s sau (T+1..5)│  │
+│  │   & Va chạm mạnh (Peak Impact > 3.5G) │  │ • Lưu 16 mốc vào Flash W25Q128      │  │
+│  │ • Giải mã NMEA 115200 bps từ GPS M10  │  │ • Phát lệnh bắn SMS SOS kèm tọa độ  │  │
+│  │   ($GNRMC, $GNGGA -> Lat, Lon, km/h)  │  │   Google Maps qua SIM 4G A7682S     │  │
+│  └───────────────────────────────────────┘  └─────────────────────────────────────┘  │
+└───────────┬─────────────────────────────┬────────────────────────────┬───────────────┘
+            │ SPI2 (10, 11, 12, 13)       │ UART2 (115200 bps)         │ BLE 5.0 (NUS)
+            ▼                             ▼                            ▼
+  [ NOR Flash W25Q128 (16MB) ]   [ GPS M10 & SIM 4G A7682S-LANS ]  [ Điện thoại / PC ]
+  • Tự động đánh thức (0xAB)     • GPS M10: GPIO 18 / GPIO 8       • Đổi SĐT (SDT:...)
+  • Tự động đảo chân DI/DO       • SIM 4G : GPIO 4  / GPIO 5       • Trích xuất (LOG)
+  • Lưu vĩnh viễn băng 15 giây   • Tự động dò xung & chiều dây     • Cân bằng (ZERO)
 ```
 
 ---
 
-## 🌟 Điểm Nhấn Kỹ Thuật Chuyên Sâu (Key Engineering Highlights)
+## 🧠 3. Cơ Sở Lý Thuyết & Thuật Toán Cốt Lõi (Core Algorithms)
 
-### 1. Bộ lọc phần cứng kép chống rung động cơ (Hardware Anti-Aliasing & UI DLPF)
-Rung động cơ học từ piston và xích xe máy nằm trong dải tần `60Hz – 250Hz`. Nếu đọc thô thông thường, hiện tượng chồng phổ (*Aliasing*) sẽ làm sai lệch hoàn toàn gia tốc kế.
-- Hệ thống can thiệp trực tiếp vào **Bank 1 & Bank 2** của cảm biến **ICM-42688** để kích hoạt bộ lọc **Anti-Aliasing Filter (AAF)** ở tần số cắt `~42Hz` kết hợp bộ lọc số **UI DLPF bậc 2** (`BW = ODR/4`).
-- Mọi nhiễu rung cơ học tần số cao bị triệt tiêu ngay từ tầng phần cứng trước khi vào vi điều khiển.
+### 3.1. Thuật toán Kalman Thích Ứng (Adaptive Kalman Filter)
+Khi xe máy di chuyển thực tế, gia tốc kế đo tổng hợp cả trọng lực $\mathbf{g}$ và gia tốc quán tính ngoại lai $\mathbf{a}_{ext}$ (lực ly tâm khi vào cua, phanh gấp, ổ gà). Nếu dùng bộ lọc Kalman cố định, góc nghiêng ước lượng sẽ bị trôi theo lực ly tâm.
 
-### 2. Thuật toán Kalman Thích Ứng (Adaptive Kalman Filter - AKF)
-Bộ lọc Kalman tuyến tính thông thường bị đánh lừa khi xe máy **ôm cua nghiêng người** hoặc **tăng tốc/phanh gấp** do lực ly tâm cộng hưởng với trọng lực.
-- Hệ thống tính toán độ lệch của vector gia tốc tổng so với trọng trường chuẩn:
-  $$e_{acc} = \left| \sqrt{a_x^2 + a_y^2 + a_z^2} - 1.0g \right|$$
-- Ma trận hiệp phương sai nhiễu đo lường $R_{adaptive}$ được điều chỉnh động theo hàm bậc hai:
-  $$R_{adaptive} = R_{base} \cdot \left(1 + \gamma \cdot e_{acc}^2\right)$$
-- Khi xe chịu gia tốc ngoại lai lớn ($e_{acc} \gg 0$), $R_{adaptive}$ tăng vọt giúp bộ lọc tự động giảm trọng số của Gia tốc kế và ưu tiên tích phân từ Con quay hồi chuyển (Gyroscope) với bước thời gian $\Delta t$ chính xác tới từng micro-giây ($\mu s$) nhờ bộ đếm xung nhịp phần cứng **ARM Cortex-M4 DWT Cycle Counter**.
+Hệ thống tính độ lệch chuẩn hóa của độ lớn vector gia tốc:
+$$e_{acc} = \left| \sqrt{a_x^2 + a_y^2 + a_z^2} - 1.0g \right|$$
 
-### 3. Cơ chế "Hộp Đen Máy Bay" 15 Giây (10s Pre-Crash + 5s Post-Crash Recorder)
-Thay vì chỉ lưu một thời điểm đơn lẻ khi va chạm, hệ thống hoạt động giống hệt **Flight Data Recorder (Hộp đen máy bay)**:
-- **Giai đoạn tuần tra bình thường:** Một bộ đệm vòng (*Circular Ring Buffer*) trong RAM liên tục lưu giữ trạng thái xe của **10 giây gần nhất (`T-10s` đến `T-1s`)**.
-- **Khoảnh khắc xảy ra va chạm (`T = 0s`):**
-  1. Đóng băng ngay lập tức 10 giây quá khứ trong bộ đệm vòng.
-  2. Chụp trạng thái va chạm cực đại tại mốc `T = 0s`.
-  3. Kích hoạt song song module **SIM 4G A7680C** gửi tin nhắn SMS khẩn cấp (kèm tọa độ Google Maps, vận tốc, lực va chạm $G_{max}$, góc nghiêng) và thực hiện cuộc gọi báo động.
-  4. Tiếp tục thu thập thêm **5 giây diễn biến sau va chạm (`T+1s` đến `T+5s`)**.
-- **Lưu trữ vĩnh viễn:** Toàn bộ chuỗi **16 mốc thời gian (`T-10s` $\rightarrow$ `T+5s`)** được ghi xuống chip nhớ **NOR Flash `W25Q128` (16MB)** qua giao tiếp SPI, cho phép phục dựng lại toàn bộ hiện trường trước, trong và sau tai nạn kể cả khi xe bị mất nguồn hoàn toàn.
+Từ đó, phương sai nhiễu đo lường $R_{adaptive}$ được điều chỉnh động ở mỗi chu kỳ $k$ ($\Delta t = 10\text{ ms}$):
+$$R_{adaptive}(k) = R_{base} \cdot \left( 1 + 10 \cdot e_{acc}^2 \right)$$
 
-### 4. Cấu hình Số Điện Thoại SOS Động & Trích xuất Hộp Đen qua Bluetooth BLE 5.0
-- Tích hợp dịch vụ **Nordic UART Service (NUS)** qua Bluetooth Low Energy (`BLE 5.0`) với tên phát sóng **`HOP_DEN_XE_MAY`**.
-- Cho phép người dùng sử dụng điện thoại thông minh (Android/iOS) để thay đổi số điện thoại người thân nhận tin nhắn SOS bất kỳ lúc nào mà không cần nạp lại code. Số điện thoại mới được lưu vĩnh viễn vào phân vùng **NVS (Non-Volatile Storage)** của ESP32-S3.
+- **Khi xe đứng yên hoặc chạy thẳng đều ($e_{acc} \approx 0$):** $R_{adaptive} \approx R_{base}$, hệ số Kalman Gain $K$ lớn giúp dùng Gia tốc kế để triệt tiêu hoàn toàn độ trôi (*Bias Drift*) của Gyroscope.
+- **Khi xe ôm cua gắt, tăng tốc hoặc xóc mạnh ($e_{acc} \gg 0$):** $R_{adaptive}$ tăng theo hàm mũ $\rightarrow$ Hệ số $K \to 0$, bộ lọc lập tức bỏ qua sai số tạm thời của Gia tốc kế và tin tưởng hoàn toàn vào phép tích phân vận tốc góc từ Gyroscope.
+
+### 3.2. Tự động quy chiếu góc lắp đặt (Auto-Zero Mounting Calibration)
+Khi bắt cố định hộp đen vào khung xe máy, cảm biến có thể nằm nghiêng một góc ban đầu $(\phi_0, \theta_0)$. Ngay tại gói tin hợp lệ đầu tiên (hoặc khi nhận lệnh `ZERO`), hệ thống ghi nhận góc tham chiếu và chuẩn hóa miền góc về $[-180^\circ, +180^\circ]$:
+$$\text{Roll}_{rel} = \text{wrap}_{180}(\text{Roll}_{Kalman} - \phi_0), \quad \text{Pitch}_{rel} = \text{wrap}_{180}(\text{Pitch}_{Kalman} - \theta_0)$$
 
 ---
 
-## 📂 Cấu Trúc Thư Mục Dự Án (Repository Structure)
+## 📂 4. Cấu Trúc Mã Nguồn (Project Directory Structure)
 
 ```text
 Motorcycle_Blackbox_Project/
 │
-├── 📁 Firmware_STM32F401/           # Dự án STM32CubeIDE (Cortex-M4 Bare-Metal / HAL Lite)
+├── 📁 Firmware_STM32F401/           # Dự án trên STM32CubeIDE 2.2.0 (STM32F401CCU6)
 │   ├── Inc/
-│   │   ├── stm32f4xx_hal.h          # Lớp trừu tượng thanh ghi phần cứng STM32F401 (RCC, GPIO, SPI1, USART1, DMA2)
-│   │   ├── dwt_stm32.h              # Bộ đếm thời gian thực vi mô DWT Cycle Counter (1 µs resolution)
-│   │   ├── icm42688_defs.h          # Bản đồ thanh ghi ICM-42688 (Bank 0, 1, 2) & cấu hình bộ lọc AAF 42Hz
-│   │   ├── icm42688.h               # Khai báo cấu trúc & hàm giao tiếp cảm biến ICM-42688
-│   │   ├── adaptive_kalman.h        # Khai báo cấu trúc thuật toán Adaptive Kalman Filter
-│   │   └── telemetry_protocol.h     # Định nghĩa khung truyền nhị phân 45-byte & thuật toán CRC16-CCITT
+│   │   ├── stm32f4xx_hal.h          # Định nghĩa thanh ghi phần cứng (RCC, GPIO, SPI1, USART1, DMA2, CoreDebug)
+│   │   ├── dwt_stm32.h              # Bộ đếm chu kỳ xung nhịp DWT Timer (Độ phân giải 1 micro-giây)
+│   │   ├── icm42688_defs.h          # Bản đồ thanh ghi ICM-42688 (Bank 0, 1, 2) & thông số lọc AAF 42Hz
+│   │   ├── icm42688.h               # Cấu trúc dữ liệu & nguyên mẫu hàm giao tiếp IMU
+│   │   ├── adaptive_kalman.h        # Cấu trúc bộ lọc Adaptive Kalman Filter
+│   │   └── telemetry_protocol.h     # Định nghĩa khung nhị phân 45-byte & hàm tính CRC16-CCITT
 │   └── Src/
-│       ├── icm42688.c               # Driver SPI Mode 3, khởi tạo AAF/DLPF & Burst Read 14-byte
-│       ├── adaptive_kalman.c        # Thực thi toán học bộ lọc Adaptive Kalman
-│       └── main.c                   # Vòng lặp thời gian thực 100Hz, FSM phát hiện tai nạn & truyền UART
+│       ├── icm42688.c               # Driver SPI Mode 3, cấu hình AAF/DLPF & Burst Read 14-byte
+│       ├── adaptive_kalman.c        # Giải thuật toán Adaptive Kalman 1D cho trục Roll & Pitch
+│       └── main.c                   # Khởi tạo FPU trước main(), vòng lặp 100Hz & truyền khung UART1
 │
-├── 📁 Firmware_ESP32S3/             # Dự án Arduino IDE / PlatformIO cho ESP32-S3 N16R8
-│   ├── ESP32_Blackbox.ino           # Chương trình chính điều phối 2 nhân FreeRTOS (Core 0 & Core 1)
-│   ├── config_types.h               # Định nghĩa Sơ đồ chân, Gói tin Telemetry & Bản ghi Hộp Đen W25Q128
-│   ├── w25q128_flash.h              # Driver SPI quản lý bộ nhớ Flash W25Q128 (Ghi/Đọc băng 15s tai nạn)
-│   ├── gps_m10_parser.h             # Bộ giải mã NMEA ($GNRMC, $GNGGA) cho GPS u-blox M10
-│   ├── sim_a7680c.h                 # Tập lệnh AT điều khiển SIM 4G A7680C (SMS Google Maps & Voice Call)
-│   └── ble_app_config.h             # Server Bluetooth BLE 5.0 nhận lệnh cấu hình SĐT & trích xuất Log
+├── 📁 Firmware_ESP32S3/             # Dự án trên Arduino IDE 2.3.4 (ESP32-S3 N16R8)
+│   ├── ESP32_Blackbox.ino           # Chương trình chính điều phối Core 0 & Core 1, Auto-Zero & FSM
+│   ├── config_types.h               # Khai báo Sơ đồ chân, Gói tin 45-byte & Cấu trúc Hộp Đen 15 giây
+│   ├── w25q128_flash.h              # Driver SPI đọc/ghi băng 15s trên W25Q128 (Tự động đảo chân DI/DO)
+│   ├── gps_m10_parser.h             # Giải mã tọa độ thập phân & tốc độ km/h từ GPS u-blox M10
+│   ├── sim_a7680c.h                 # Điều khiển SIM 4G A7682S-LANS & GPS M10 (Tự động dò xung & chiều dây)
+│   └── ble_app_config.h             # Dịch vụ Bluetooth BLE 5.0, lưu NVS Flash & xử lý tập lệnh điều khiển
 │
-└── 📄 README.md                     # Tài liệu hướng dẫn kỹ thuật toàn diện của dự án
+└── 📄 README.md                     # Tài liệu kỹ thuật chi tiết của dự án
 ```
 
 ---
 
-## 🔌 Sơ Đồ Đấu Nối Phần Cứng Chi Tiết (Hardware Pinout)
+## 🔌 5. Sơ Đồ Đấu Nối Phần Cứng (Hardware Wiring & Pinout)
 
-### 1. Sơ đồ đấu nối trên Vi điều khiển `STM32F401CCU6 (BlackPill)`
-| Thiết bị kết nối | Chân Thiết bị | Chân STM32F401 | Giao thức / Chức năng | Ghi chú kỹ thuật |
+### 5.1. Kết nối trên `STM32F401CCU6 (BlackPill)`
+| Thiết bị | Chân Thiết bị | Chân STM32F401 | Chức năng | Lưu ý |
 | :--- | :---: | :---: | :--- | :--- |
-| **Cảm biến ICM-42688** | `VCC / VDDIO` | **`3.3V`** | Nguồn nuôi | **Tuyệt đối không cấp 5V** |
-| | `GND` | **`GND`** | Mass chung | Common Ground |
-| | `NCS (CS)` | **`PA4`** | `GPIO_Output` | Chip Select (Active Low) |
-| | `SCLK (SCK)` | **`PA5`** | `SPI1_SCK` (AF5) | SPI Mode 3 (`10.5 MHz`) |
-| | `SDO (MISO)` | **`PA6`** | `SPI1_MISO` (AF5) | Dữ liệu từ ICM-42688 $\rightarrow$ STM32 |
-| | `SDI (MOSI)` | **`PA7`** | `SPI1_MOSI` (AF5) | Lệnh cấu hình từ STM32 $\rightarrow$ ICM-42688 |
-| **Giao tiếp ESP32-S3** | `GPIO 17 (RX1)` | **`PA9`** | `USART1_TX` (AF7) | Bắn gói tin 45-byte @ `115200 bps` |
-| | `GPIO 16 (TX1)` | **`PA10`** | `USART1_RX` (AF7) | Nhận lệnh từ ESP32-S3 |
-| | `GND` | **`GND`** | Mass chung | Đồng bộ mức điện áp logic |
-| **Mạch nạp ST-Link V2**| `3.3V / GND` | **`3V3 / GND`** | Nguồn nạp | |
-| | `SWDIO / SWCLK`| **`DIO / CLK`** | Cổng nạp SWD | |
-| **Đèn trạng thái** | `Onboard LED` | **`PC13`** | `GPIO_Output` | Chớp `1s/lần` khi chạy bình thường |
+| **ICM-42688** | `VCC / VDDIO` | **`3.3V`** | Nguồn nuôi `3.3V` | **Cấm cấp 5V** |
+| | `GND` | **`GND`** | Mass chung | |
+| | `NCS (CS)` | **`PA4`** | `GPIO_Output` | Chip Select |
+| | `SCLK (SCK)` | **`PA5`** | `SPI1_SCK` (AF5) | SPI Mode 3 (`10.5MHz`) |
+| | `SDO (MISO)` | **`PA6`** | `SPI1_MISO` (AF5) | |
+| | `SDI (MOSI)` | **`PA7`** | `SPI1_MOSI` (AF5) | |
+| **ESP32-S3** | `GPIO 17 (RX1)`| **`PA9`** | `USART1_TX` (AF7) | Truyền gói 45-byte (`115200`) |
+| | `GPIO 16 (TX1)`| **`PA10`** | `USART1_RX` (AF7) | |
+| | `3V3 / GND` | **`3V3 / GND`**| Nguồn & Mass chung | Đồng bộ áp logic |
+| **LED Nhịp tim**| `LED Blue` | **`PC13`** | `GPIO_Output` | Chớp `1s/lần` khi chạy tốt |
+
+### 5.2. Kết nối trên `ESP32-S3 N16R8`
+*(Không sử dụng các chân `GPIO 35, 36, 37` dành riêng cho Octal PSRAM 8MB nội bộ)*
+
+| Thiết bị ngoại vi | Chân Thiết bị | Chân ESP32-S3 N16R8 | Giao thức / Tốc độ | Cơ chế thông minh tích hợp |
+| :--- | :---: | :---: | :--- | :--- |
+| **1. STM32F401** | `PA9 (TX)` | **`GPIO 17`** | `UART1_RX` (`115200`) | Kiểm tra CRC16 & Auto-Zero góc `0°` |
+| | `PA10 (RX)` | **`GPIO 16`** | `UART1_TX` (`115200`) | |
+| | `GND` | **`GND`** | Common Ground | |
+| **2. Flash W25Q128** | `VCC` | **`3.3V`** | Nguồn `3.3V` | **Chỉ cấp 3.3V** |
+| | `GND` | **`GND`** | Common Ground | |
+| | `CS` | **`GPIO 10`** | `SPI2_CS` | Tự động đánh thức (`0xAB`) & |
+| | `DI (MOSI)` | **`GPIO 11`** | `SPI2_MOSI` | Tự động đảo chiều chân `11 <-> 13` |
+| | `CLK (SCK)` | **`GPIO 12`** | `SPI2_SCK` | nếu cắm ngược dây `DI / DO` |
+| | `DO (MISO)` | **`GPIO 13`** | `SPI2_MISO` | |
+| **3. GPS u-blox M10**| `TX` | **`GPIO 18`** | `UART2_RX` (`115200`) | Tự động đo xung tìm chân `TX` |
+| | `RX` | **`GPIO 8`** | `UART2_TX` (`115200`) | giữa `GPIO 18` và `GPIO 8` |
+| | `VCC / GND` | **`5V / GND`**| Nguồn nuôi GPS | |
+| **4. SIM A7682S-LANS**| `TXD` | **`GPIO 4`** | `UART2_RX` (`115200`) | Tự động dò chiều dây `4 <-> 5` & |
+| | `RXD` | **`GPIO 5`** | `UART2_TX` (`115200`) | lọc bỏ nhiễu byte `0x00` |
+| | `VCC / GND` | **`5V / GND`**| Nguồn dòng đỉnh 2A | |
 
 ---
 
-### 2. Sơ đồ đấu nối trên Vi điều khiển Trung tâm `ESP32-S3 N16R8`
-*(Lưu ý: Tránh hoàn toàn các chân `GPIO 35, 36, 37` dành riêng cho Octal PSRAM 8MB nội bộ)*
+## 📦 6. Đặc Tả Cấu Trúc Khung Truyền & Bộ Nhớ Hộp Đen
 
-| Thiết bị ngoại vi | Chân Thiết bị | Chân ESP32-S3 N16R8 | Bộ ngoại vi | Ghi chú kỹ thuật |
-| :--- | :---: | :---: | :---: | :--- |
-| **1. STM32F401CCU6** | `PA9 (TX)` | **`GPIO 17`** | `UART1_RX` | Nhận gói tin Kalman `100Hz` (`115200 bps`) |
-| | `PA10 (RX)` | **`GPIO 16`** | `UART1_TX` | Kênh truyền ngược |
-| | `GND` | **`GND`** | Common GND | Bắt buộc nối Mass chung |
-| **2. Flash W25Q128 (16MB)**| `VCC` | **`3.3V`** | Power Supply | Chỉ cấp điện áp `3.3V` |
-| | `GND` | **`GND`** | Common GND | Mass chung |
-| | `CS` | **`GPIO 10`** | `SPI2_CS` | Chip Select |
-| | `DI (MOSI)` | **`GPIO 11`** | `SPI2_MOSI` | Dữ liệu ghi vào W25Q128 |
-| | `CLK (SCK)` | **`GPIO 12`** | `SPI2_SCK` | Xung nhịp SPI |
-| | `DO (MISO)` | **`GPIO 13`** | `SPI2_MISO` | Dữ liệu đọc từ W25Q128 |
-| **3. GPS u-blox M10** | `TX` | **`GPIO 18`** | `UART2_RX` | Nhận chuỗi NMEA (`38400 bps`) |
-| | `RX` | **`GPIO 8`** | `UART2_TX` | Cấu hình GPS |
-| | `VCC / GND` | **`5V / GND`** | Power Supply | Đặt ăng-ten hướng lên trời |
-| **4. SIM 4G A7680C** | `TXD` | **`GPIO 4`** | `UART0_RX` | Nhận phản hồi AT (`115200 bps`) |
-| | `RXD` | **`GPIO 5`** | `UART0_TX` | Gửi tập lệnh AT điều khiển |
-| | `VCC / GND` | **`5V (2A) / GND`** | Power Supply | Yêu cầu nguồn dòng đỉnh $\ge 2\text{A}$ |
+### 6.1. Khung truyền UART `TelemetryPacket_t` (45 Bytes @ 100Hz)
+| Byte Offset | Kiểu dữ liệu | Tên trường | Mô tả |
+| :---: | :---: | :--- | :--- |
+| `0 - 1` | `uint8_t[2]` | `magic_1, magic_2` | Chuỗi đồng bộ đầu khung cố định: `0xAA 0x55` |
+| `2 - 5` | `uint32_t` | `seq_num` | Số thứ tự gói tin tăng dần liên tục |
+| `6 - 9` | `uint32_t` | `timestamp_us` | Thời gian vi mô từ bộ đếm DWT ($\mu s$) |
+| `10 - 21` | `float[3]` | `accel[3]` | Gia tốc 3 trục $A_x, A_y, A_z$ ($g$) |
+| `22 - 33` | `float[3]` | `gyro[3]` | Vận tốc góc 3 trục $G_x, G_y, G_z$ ($^\circ/s$) |
+| `34 - 37` | `float` | `roll` | Góc nghiêng trái/phải sau lọc Adaptive Kalman ($^\circ$) |
+| `38 - 41` | `float` | `pitch` | Góc chúi/ngửa sau lọc Adaptive Kalman ($^\circ$) |
+| `42` | `uint8_t` | `crash_state` | `0`: Bình thường, `2`: Ngã xe, `3`: Va chạm mạnh, `99`: Lỗi IMU |
+| `43 - 44` | `uint16_t` | `crc16` | Mã kiểm tra **CRC16-CCITT** (`Poly = 0x1021, Init = 0xFFFF`) |
 
----
-
-## 📦 Đặc Tả Giao Thức Gói Tin Nhị Phân (Binary Telemetry Protocol)
-
-Mỗi `10ms` (`100Hz`), STM32F401 đóng gói và truyền 1 khung dữ liệu nhị phân dài cố định **45 Bytes** (Little-Endian, `#pragma pack(1)`) sang ESP32-S3:
-
-| Byte Offset | Kiểu dữ liệu | Tên trường | Đơn vị / Giá trị | Mô tả chi tiết |
-| :---: | :---: | :--- | :---: | :--- |
-| `0` | `uint8_t` | `magic_1` | `0xAA` | Byte đồng bộ đầu khung thứ nhất |
-| `1` | `uint8_t` | `magic_2` | `0x55` | Byte đồng bộ đầu khung thứ hai |
-| `2 - 5` | `uint32_t` | `seq_num` | `0 .. 2^32-1` | Số thứ tự gói tin liên tiếp |
-| `6 - 9` | `uint32_t` | `timestamp_us`| Micro-giây ($\mu s$)| Thời gian thực từ bộ đếm DWT |
-| `10 - 21` | `float[3]` | `accel[3]` | $g$ ($\pm 16g$) | Gia tốc tuyến tính 3 trục $A_x, A_y, A_z$ |
-| `22 - 33` | `float[3]` | `gyro[3]` | $^\circ/s$ ($\pm 2000^\circ/s$)| Vận tốc góc 3 trục $G_x, G_y, G_z$ |
-| `34 - 37` | `float` | `roll` | Độ ($^\circ$) | Góc nghiêng trái/phải sau lọc Adaptive Kalman |
-| `38 - 41` | `float` | `pitch` | Độ ($^\circ$) | Góc chúi/ngửa xe sau lọc Adaptive Kalman |
-| `42` | `uint8_t` | `crash_state` | `0, 1, 2, 3, 99`| `0`: Bình thường, `2`: Ngã xe, `3`: Va chạm, `99`: Lỗi IMU |
-| `43 - 44` | `uint16_t` | `crc16` | `CRC16-CCITT` | Đa thức sinh `0x1021`, kiểm tra toàn vẹn từ byte `0..42` |
+### 6.2. Cấu trúc Băng Ghi 15 Giây Tai Nạn trên `W25Q128` (`Sector 1: 0x001000`)
+Mỗi vụ tai nạn lưu **16 bản ghi liên tiếp** (mỗi bản ghi căn lề `64 Bytes` để không vượt ranh giới Page `256 Bytes` của Flash):
+- **Bản ghi `0 .. 9` (`rel_sec = -10s .. -1s`):** 10 giây diễn biến **TRƯỚC** khi xảy ra tai nạn (Trích xuất từ bộ đệm vòng trong RAM).
+- **Bản ghi `10` (`rel_sec = 0s`):** Khoảnh khắc **VA CHẠM / ĐỔ XE** (`💥 DAM!`).
+- **Bản ghi `11 .. 15` (`rel_sec = +1s .. +5s`):** 5 giây diễn biến **SAU** khi xảy ra tai nạn (`⚠️ NGA`).
 
 ---
 
-## 📱 Tập Lệnh Điều Khiển Qua Bluetooth (BLE Smartphone Commands)
+## 📱 7. Hướng Dẫn Điều Khiển Qua Bluetooth BLE & Serial Monitor
 
-> 📱 **App giao diện đồ họa:** xem [`ble_app/`](ble_app/README.md) — web app Bluetooth (PWA) có đồng hồ góc nghiêng, đổi số SOS, biểu đồ băng hộp đen 15 giây và cảnh báo tai nạn.
+Kết nối điện thoại vào Bluetooth LE tên **`HOP_DEN_XE_MAY`** (hoặc gõ trực tiếp vào ô `Message` trên **Serial Monitor `115200 baud`** của máy tính):
 
-Hoặc dùng ứng dụng **Serial Bluetooth Terminal** (chế độ *Bluetooth LE*) / **nRF Connect** trên điện thoại, kết nối vào thiết bị **`HOP_DEN_XE_MAY`** và gửi các lệnh văn bản sau:
-
-| Cú pháp lệnh gửi đi | Chức năng thực hiện | Phản hồi từ Hộp Đen về Điện thoại |
+| Lệnh điều khiển | Chức năng thực hiện | Ví dụ / Kết quả phản hồi |
 | :--- | :--- | :--- |
-| **`SDT:0912345678`** | Cập nhật số điện thoại nhận tin nhắn & cuộc gọi cứu hộ SOS (Lưu vĩnh viễn vào bộ nhớ NVS Flash) | `✅ Da luu SDT SOS moi: 0912345678` |
-| **`INFO`** | Kiểm tra nhanh trạng thái hiện tại của xe (SĐT SOS, Góc Roll/Pitch, Trạng thái bắt vệ tinh GPS, Vận tốc km/h) | Bảng thông số thời gian thực của xe |
-| **`LOG`** | Trích xuất **Băng ghi Hộp Đen 15 giây (`T-10s` đến `T+5s`)** từ chip nhớ Flash **`W25Q128`** | Bảng phục dựng diễn biến 15 giây quanh vụ tai nạn |
-| **`CLEAR`** | Xóa trắng lịch sử tai nạn lưu trong chip nhớ **`W25Q128`** | `✅ Da xoa trang lich su hop den W25Q128!` |
-| **`TEST_SOS`** | Kích hoạt giả lập sự cố tai nạn ngay lập tức để kiểm tra ghi `W25Q128` và gửi tin nhắn `SIM 4G` | `🚨 Dang kich hoat thu nghiem SOS!` |
+| **`SDT:0889602028`** | Thay đổi số điện thoại nhận tin nhắn cứu hộ SOS và lưu vĩnh viễn vào bộ nhớ Flash NVS | `✅ ĐÃ CẬP NHẬT SĐT SOS MỚI: 0889602028` |
+| **`ZERO`** | Lấy tư thế đặt hộp đen hiện tại làm mốc cân bằng chuẩn `Roll = 0.00°, Pitch = 0.00°` | `✅ Đã đặt lại góc hiện tại làm mốc 0.00°!` |
+| **`INFO`** | Xem nhanh thông số góc nghiêng, trạng thái GPS và SĐT SOS hiện tại | Hiển thị bảng tóm tắt trạng thái xe |
+| **`LOG`** | Đọc và phục dựng **Băng ghi Hộp Đen 15 giây (`T-10s` $\rightarrow$ `T+5s`)** từ chip nhớ `W25Q128` | Xuất bảng phục dựng 16 mốc thời gian tai nạn |
+| **`CLEAR`** | Xóa trắng lịch sử tai nạn trong chip nhớ `W25Q128` | `✅ [W25Q128] Đã xóa trắng lịch sử hộp đen!` |
+| **`TEST_SOS`** *(hoặc `test sos`)* | Kích hoạt giả lập tai nạn ngay lập tức: Bắn tin nhắn SMS 4G + Lưu 15 giây vào `W25Q128` | Bắn SMS kèm Link Google Maps về SĐT đã cài |
 
-### Ví dụ dữ liệu trích xuất từ chip nhớ `W25Q128` khi gửi lệnh `LOG`:
+---
+
+## 📊 8. Kết Quả Thực Nghiệm Hệ Thống (Experimental Logs)
+
+### 8.1. Log giám sát thời gian thực (STM32 100Hz + GPS u-blox M10 Fix 8 vệ tinh)
+```text
+[# 53230] Roll: -4.05° | Pitch: -4.77° | BINH THUONG || [GPS] Fix:1 Sat: 8 Lat:10.88206 Lon:106.76079 ( 0.4km/h) || SDT:0889602028
+[# 53250] Roll: -4.07° | Pitch: -4.78° | BINH THUONG || [GPS] Fix:1 Sat: 8 Lat:10.88206 Lon:106.76079 ( 0.4km/h) || SDT:0889602028
+```
+
+### 8.2. Nội dung tin nhắn SMS cứu hộ gửi về điện thoại qua `A7682S-LANS` (Mobifone 4G)
+```text
+[HOP DEN SOS] NGA XE BAT DONG! | Luc: 2.4G | Goc Roll=68.5, Pitch=-12.1 | Toc do: 0.0km/h | Map: https://maps.google.com/?q=10.882060,106.760790
+```
+
+### 8.3. Bảng phục dựng hiện trường 15 giây trích xuất từ chip nhớ `W25Q128` (Lệnh `LOG`)
 ```text
 === PHUC DUNG 15 GIAY TAI NAN (W25Q128) ===
-[T-10s] Roll:  2.1° Pitch:  1.4° |  1.0G | 42.5km/h | OK
-[T -9s] Roll:  3.0° Pitch:  1.5° |  1.0G | 44.0km/h | OK
+[T-10s] Roll:  0.2° Pitch: -0.1° |  1.0G | GPS:10.88206,106.76079 (28.5km/h) | OK
+[T -9s] Roll:  1.1° Pitch: -0.3° |  1.0G | GPS:10.88206,106.76079 (30.2km/h) | OK
 ...
-[T -1s] Roll: 28.4° Pitch: -6.2° |  1.8G | 31.0km/h | OK
-[T +0s] Roll: 67.5° Pitch: 18.2° |  4.9G |  0.0km/h | 💥 DAM!
-[T +1s] Roll: 68.8° Pitch: 19.0° |  1.1G |  0.0km/h | ⚠️ NGA
+[T -1s] Roll: 34.0° Pitch: -8.5° |  1.9G | GPS:10.88206,106.76079 (18.4km/h) | OK
+[T +0s] Roll: 68.5° Pitch:-12.1° |  4.6G | GPS:10.88206,106.76079 ( 0.0km/h) | 💥 DAM!
+[T +1s] Roll: 69.2° Pitch:-12.3° |  1.1G | GPS:10.88206,106.76079 ( 0.0km/h) | ⚠️ NGA
 ...
-[T +5s] Roll: 68.8° Pitch: 19.0° |  1.0G |  0.0km/h | ⚠️ NGA
+[T +5s] Roll: 69.2° Pitch:-12.3° |  1.0G | GPS:10.88206,106.76079 ( 0.0km/h) | ⚠️ NGA
 ===========================================
 ```
-
----
-
-## 🛠️ Hướng Dẫn Biên Dịch & Nạp Chương Trình (Build & Flash)
-
-### 1. Nạp Firmware cho `STM32F401CCU6`
-1. Mở phần mềm **STM32CubeIDE** (tương thích hoàn toàn với bản `2.2.0` mới nhất).
-2. Đưa các file `.h` vào thư mục `Inc/` và các file `.c` vào thư mục `Src/`.
-3. Bấm biểu tượng **Build (🔨)** để biên dịch (`0 errors, 0 warnings`).
-4. Kết nối mạch nạp **ST-Link V2** và bấm nút **Run (▶️)** để nạp xuống chip. Đèn LED `PC13` sẽ chớp nhịp tim đều đặn `1 giây/lần` báo hiệu cảm biến `ICM-42688` và đường truyền `UART1` đang hoạt động.
-
-### 2. Nạp Firmware cho `ESP32-S3 N16R8`
-1. Mở **Arduino IDE 2.3.x**, đảm bảo đã cài đặt gói board **esp32 by Espressif Systems**.
-2. Cấu hình trong menu **Tools**:
-   - **Board:** `ESP32S3 Dev Module`
-   - **Flash Size:** `16MB (128Mb)`
-   - **PSRAM:** `OPI PSRAM`
-3. Mở file `ESP32_Blackbox.ino` (cùng 5 tab `.h` đi kèm) và nhấn **Upload (➡️)**.
-4. Mở **Serial Monitor** ở tốc độ **`115200 baud`** để giám sát trực tiếp toàn bộ thông số của hệ thống.
-
----
-
-## 📜 Giấy Phép & Tác Giả (License & Author)
-Dự án được phát triển phục vụ mục đích nghiên cứu kỹ thuật hệ thống nhúng, xử lý tín hiệu số (DSP) và an toàn giao thông thông minh.
