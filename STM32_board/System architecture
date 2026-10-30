@@ -1,11 +1,12 @@
-[ ICM-42688 INT1 Pin ] ──(EXTI Interrupt)──> [ STM32 DWT Timer: Đọc dt chính xác bằng Microsecond ]
-                                                            │
-[ Dữ liệu Raw Accel/Gyro ] ───> [ 1. Adaptive Kalman Filter (Tự chỉnh ma trận R khi có gia tốc động) ]
-                                                            │
-                                                [ 2. FSM Crash Detection ] (Nhận diện Đổ/Va chạm)
-                                                            │
-                                                [ 3. Snapshot Data (Chống Race-Condition) ]
-                                                            │
-                                                [ 4. Frame Builder + CRC16-CCITT ]
-                                                            │
-[ ESP32 ] <────(Không nghẽn CPU)─────── [ STM32 UART Non-Blocking DMA Transmission ]
+Core/
+├── Inc/
+│   ├── icm42688_defs.h       <-- Bảng mã thanh ghi & thông số lọc chống rung AAF
+│   ├── icm42688.h            <-- Khai báo hàm đọc cảm biến
+│   ├── dwt_stm32.h           <-- Bộ đếm thời gian Microsecond siêu chính xác
+│   ├── adaptive_kalman.h     <-- Khai báo bộ lọc Kalman thích ứng (chống lực ly tâm)
+│   └── telemetry_protocol.h  <-- Cấu trúc đóng gói dữ liệu + Checksum CRC16 gửi ESP32
+│
+└── Src/
+    ├── icm42688.c            <-- Code phần cứng: Cấu hình SPI, bật lọc 42Hz, đọc Burst 14 bytes
+    ├── adaptive_kalman.c     <-- Code giải thuật toán Adaptive Kalman
+    └── main.c                <-- File tổng hợp

@@ -185,11 +185,11 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 class MyRxCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-        // CHỈ COPY MẢNG CHAR NHẸ NHÀNG, KHÔNG XỬ LÝ NẶNG TRONG CALLBACK NÀY!
-        std::string val = pCharacteristic->getValue();
+        // Tương thích cả ESP32 Core 2.x và Core 3.x (Arduino IDE 2.3.4)
+        String val = String(pCharacteristic->getValue().c_str());
         if (val.length() > 0) {
             size_t copyLen = (val.length() < sizeof(bleRxCmdBuf) - 1) ? val.length() : (sizeof(bleRxCmdBuf) - 1);
-            memcpy(bleRxCmdBuf, val.data(), copyLen);
+            memcpy(bleRxCmdBuf, val.c_str(), copyLen);
             bleRxCmdBuf[copyLen] = '\0';
             hasPendingBleCmd = true;
         }
@@ -233,8 +233,8 @@ void BLE_Init_Server() {
     pAdvertising->setScanResponse(true);
     pAdvertising->start();
 
-    // Khởi tạo Task riêng với Stack 8192 bytes chuyên xử lý lệnh BLE
-    xTaskCreatePinnedToCore(Task_BLE_Command_Worker, "BleCmdWorker", 8192, NULL, 1, NULL, 1);
+    // Khởi tạo Task riêng trên Core 0 (cùng Core với Flash/SIM để tránh xung đột SPI)
+    xTaskCreatePinnedToCore(Task_BLE_Command_Worker, "BleCmdWorker", 8192, NULL, 1, NULL, 0);
 
     Serial.println("✅ [BLUETOOTH] Đã phát sóng BLE: 'HOP_DEN_XE_MAY'");
 }
