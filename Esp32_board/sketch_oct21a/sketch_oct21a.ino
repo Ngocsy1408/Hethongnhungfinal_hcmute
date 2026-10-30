@@ -6,22 +6,21 @@
 #include "sim_a7680c.h"
 #include "ble_app_config.h"
 
-/* Khởi tạo phần cứng */
-HardwareSerial STM32_UART(1);
-HardwareSerial SIM_UART(2);
+/* 2 Bộ Hardware UART độc lập hoàn toàn */
+HardwareSerial STM32_UART(1); // RX = GPIO 17 (Nhận STM32), TX = GPIO 5/4 (Phát lệnh SMS sang SIM)
+HardwareSerial GPS_UART(2);   // RX = GPIO 18 (Nhận GPS M10), TX = GPIO 8 (Cố định 115200 cho GPS M10)
 
 W25Q128_Flash flashMemory;
 GPS_M10       gpsParser;
-SIM_A7680C    simModem(&SIM_UART);
+SIM_A7680C    simModem(&STM32_UART);
 Preferences   nvsPrefs;
 
 /* Biến toàn cục hệ thống */
-String                     sosPhoneNumber   = "0889602028";
+String                     sosPhoneNumber   = "0342018857";
 volatile TelemetryPacket_t latestIMU;
 volatile GPSData_t         latestGPS        = {false, 0.0, 0.0, 0.0f, 0};
 volatile bool              sosTriggered     = false;
 volatile bool              sosHandled       = false;
-volatile bool              simSendingNow    = false; // Khóa bảo vệ khi SIM đang bắn SMS
 volatile float             peakImpactG      = 1.0f;
 volatile float             secMaxG          = 1.0f;
 
@@ -30,12 +29,38 @@ float    offsetRoll       = 0.0f;
 float    offsetPitch      = 0.0f;
 
 uint8_t  rxBuffer[sizeof(TelemetryPacket_t)];
-uint16_t rxIndex     = 0;
-uint32_t rxByteCount = 0;
+uint16_t rxIndex           = 0;
+uint32_t rxByteCount       = 0;
+volatile uint32_t gpsByteCount = 0;
+volatile uint32_t gpsNmeaCount = 0;
 
 BlackboxLogRecord_t preCrashRing[10];
 uint8_t             preRingIdx = 0;
 BlackboxLogRecord_t fullCrashWindow[BLACKBOX_WINDOW_LEN];
+
+// Khởi động GPS u-blox M10 giống hệt 100% file đọc HEX vừa chạy thành công!
+void wakeUpGpsM10() {
+    const uint8_t ubxEnableNMEA[] = {
+        0xB5, 0x62, 0x06, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0xD0, 0x08, 0x00, 0x00, 0x00, 0xC2, 0x01, 0x00, 0x07, 0x00,
+        0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x7E
+    };
+
+    long bauds[] = {115200, 38400, 9600, 57600, 230400};
+    for (int i = 0; i < 5; i++) {
+        GPS_UART.end();
+        GPS_UART.setRxBufferSize(2048);
+        GPS_UART.begin(bauds[i], SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+        GPS_UART.write(ubxEnableNMEA, sizeof(ubxEnableNMEA));
+        delay(150);
+    }
+
+    // Khóa cố định ở 115200 baud (vĩnh viễn không gọi .end() nữa)
+    GPS_UART.end();
+    GPS_UART.setRxBufferSize(2048);
+    GPS_UART.begin(115200, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
+    Serial.println("✅ [GPS M10] Đã kích hoạt & khóa cố định ở 115200 baud!");
+}
 
 uint16_t Calculate_CRC16(const uint8_t *data, uint16_t length) {
     uint16_t crc = 0xFFFF;
@@ -74,12 +99,9 @@ BlackboxLogRecord_t takeCurrentSnapshot(int8_t relSec, float g_val) {
     return rec;
 }
 
-/* ============================================================================
- * TASK QUẢN LÝ HỘP ĐEN 15 GIÂY, W25Q128 & SIM 4G (Chạy trên CORE 0)
- * ============================================================================ */
 void Task_Blackbox_Manager(void *pvParameters) {
-    uint32_t lastPrintMs   = 0;
-    uint32_t lastOneSecMs  = millis();
+    uint32_t lastPrintMs  = 0;
+    uint32_t lastOneSecMs = millis();
     bool     recordingPost = false;
     uint8_t  postSecCount  = 0;
 
@@ -90,7 +112,6 @@ void Task_Blackbox_Manager(void *pvParameters) {
 
         uint32_t now = millis();
 
-        // 1. Nhịp đồng hồ mỗi 1 giây: Lưu bộ đệm vòng 10s Trước & Thu 5s Sau tai nạn
         if (now - lastOneSecMs >= 1000) {
             lastOneSecMs = now;
             float g_this_sec = secMaxG;
@@ -113,7 +134,6 @@ void Task_Blackbox_Manager(void *pvParameters) {
             }
         }
 
-        // 2. Khoảnh khắc phát hiện tai nạn (T = 0s)
         if (sosTriggered && !sosHandled) {
             sosHandled    = true;
             recordingPost = true;
@@ -132,7 +152,6 @@ void Task_Blackbox_Manager(void *pvParameters) {
             memcpy(&gpsSnap, (const void*)&latestGPS, sizeof(GPSData_t));
             BLE_SendToPhone("🚨 TAI NAN! Dang gui SMS SOS toi: " + sosPhoneNumber + "\n");
 
-            simSendingNow = true;
             simModem.sendEmergencySOS(
                 sosPhoneNumber,
                 latestIMU.roll,
@@ -141,7 +160,6 @@ void Task_Blackbox_Manager(void *pvParameters) {
                 gpsSnap,
                 fullCrashWindow[10].crash_state
             );
-            simSendingNow = false;
             lastOneSecMs = millis();
         }
 
@@ -151,14 +169,14 @@ void Task_Blackbox_Manager(void *pvParameters) {
             peakImpactG  = 1.0f;
         }
 
-        // 3. In đầy đủ thông số STM32 + GPS M10 + SĐT SOS mỗi 200ms
         if (now - lastPrintMs >= 200) {
             lastPrintMs = now;
-            Serial.printf("[#%6lu] Roll:%6.2f° | Pitch:%6.2f° | %s || [GPS] Fix:%d Sat:%2d Lat:%.5f Lon:%.5f (%4.1fkm/h) || SDT:%s\n",
+            Serial.printf("[#%6lu] Roll:%6.2f° | Pitch:%6.2f° | %s || [GPS NMEA:%4lu] Fix:%d Sat:%2d Lat:%.5f Lon:%.5f (%4.1fkm/h) || SDT:%s\n",
                           latestIMU.seq_num,
                           latestIMU.roll,
                           latestIMU.pitch,
                           getCrashStateText(latestIMU.crash_state),
+                          gpsNmeaCount,
                           latestGPS.is_valid,
                           latestGPS.satellites,
                           latestGPS.latitude,
@@ -176,29 +194,30 @@ void setup() {
     delay(500);
 
     Serial.println("\n=======================================================");
-    Serial.println("   HỘP ĐEN XE MÁY: STM32 + M10 + A7682S-LANS + W25Q128 ");
+    Serial.println("   HỘP ĐEN XE MÁY HCMUTE: HOÀN CHỈNH 100%              ");
     Serial.println("=======================================================");
 
-    // 1. Khởi tạo W25Q128, Bluetooth BLE, SIM A7682S-LANS và GPS M10 trước
+    // 1. Khởi tạo W25Q128 và Bluetooth BLE
     flashMemory.begin(W25Q_CS_PIN, W25Q_SCK_PIN, W25Q_MISO_PIN, W25Q_MOSI_PIN);
     BLE_Init_Server();
-    simModem.initModem();
 
-    // 2. Mở cổng STM32_UART (RX=17, TX=16) sau cùng để đảm bảo không bị ngắt
+    // 2. Đánh thức & khóa cố định GPS u-blox M10 trên UART2 (RX=18, TX=8 @ 115200)
+    wakeUpGpsM10();
+
+    // 3. Mở UART1 cố định: RX = 17 (STM32), TX = Chân SIM (5 hoặc 4)
+    int simTxPin = simModem.detectSimTxPin();
     STM32_UART.setRxBufferSize(2048);
-    STM32_UART.begin(STM32_BAUD, SERIAL_8N1, STM32_RX_PIN, STM32_TX_PIN);
+    STM32_UART.begin(115200, SERIAL_8N1, STM32_RX_PIN, simTxPin);
+    simModem.initModem();
     while (STM32_UART.available()) STM32_UART.read();
 
     xTaskCreatePinnedToCore(Task_Blackbox_Manager, "BlackboxMgr", 8192, NULL, 2, NULL, 0);
 }
 
-/* ============================================================================
- * VÒNG LẶP CHÍNH loop() (CORE 1): Đọc gói tin 100Hz từ STM32 & Giải mã GPS M10
- * ============================================================================ */
 void loop() {
     static uint32_t tiltStartMs = 0;
 
-    // 1. Đọc gói tin Kalman 100Hz từ STM32F401
+    // 1. Đọc gói tin Kalman 100Hz từ STM32F401 trên UART1
     while (STM32_UART.available()) {
         uint8_t b = STM32_UART.read();
         rxByteCount++;
@@ -242,10 +261,10 @@ void loop() {
                 if (g_total > secMaxG)     secMaxG     = g_total;
 
                 if (g_total > 3.5f) {
-                    tempPkt.crash_state = 3; // Va chạm mạnh
+                    tempPkt.crash_state = 3;
                 } else if (fabsf(relRoll) > 55.0f || fabsf(relPitch) > 55.0f) {
                     if (tiltStartMs == 0) tiltStartMs = millis();
-                    else if (millis() - tiltStartMs >= 1500) tempPkt.crash_state = 2; // Ngã xe!
+                    else if (millis() - tiltStartMs >= 1500) tempPkt.crash_state = 2;
                     else tempPkt.crash_state = 0;
                 } else {
                     tiltStartMs = 0;
@@ -261,13 +280,12 @@ void loop() {
         }
     }
 
-    // 2. Đọc liên tục bản tin NMEA từ GPS u-blox M10 khi không bận bắn SMS
-    if (!simSendingNow) {
-        while (SIM_UART.available()) {
-            uint8_t c = SIM_UART.read();
-            if (c != 0x00) {
-                gpsParser.feed((char)c, &latestGPS);
-            }
+    // 2. Đọc liên tục bản tin NMEA từ GPS u-blox M10 trên UART2 riêng biệt
+    while (GPS_UART.available()) {
+        uint8_t c = GPS_UART.read();
+        if (c != 0x00) {
+            gpsByteCount++;
+            gpsParser.feed((char)c, &latestGPS);
         }
     }
 
